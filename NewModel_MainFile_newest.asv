@@ -74,6 +74,8 @@ THOLDfrom = RDlaborto+1; THOLDto = THOLDfrom-1 + N^2*S;
 totvarnumb = THOLDto;
 
 
+
+
 %% solve model
 
 x0 = [0.7.*(1+(1:3*N-1)./(3*N-1))'; .02.*(1+(1:N*S)./(N*S))'; 2.*(1+(1:N^2*S)./(N^2*S))']; % starting guess.
@@ -89,16 +91,18 @@ ub = [Inf.*ones(1,N-1) ...  % P_input (Price index)
       Inf.*ones(1,N) ...    % Y
       Inf.*ones(1,N*S) ...  % ZR
       Inf.*ones(1,N^2*S)];  % patenting thresholds. whole vector is upper bound
-  
-  
 
-%% Jacobian check (if =true) and solving the model
 
-opts_checkgradient = optimoptions(@fmincon,'Algorithm','interior-point', ...
-'MaxFunctionEvaluations', 233009, 'MaxIterations', 100000, ...
-'TolFun', 1e-12, 'StepTolerance', 1e-12 ...
-, 'SpecifyConstraintGradient',true,  'SpecifyObjectiveGradient',false,  ... 
-'CheckGradients',true,  'FiniteDifferenceType','central'); % set gradient check (jacobian) to "true" or "false" here.
+%%
+NewModel_SteadyState_newest(x0)
+
+%% Jacobian check
+
+    opts_checkgradient = optimoptions(@fmincon,'Algorithm','interior-point', ...
+    'MaxFunctionEvaluations', 233009, 'MaxIterations', 100000, ...
+    'TolFun', 1e-12, 'StepTolerance', 1e-12 ...
+    , 'SpecifyConstraintGradient',true,  'SpecifyObjectiveGradient',false,  ... 
+    'CheckGradients',false,  'FiniteDifferenceType','central'); % set gradient check (jacobian) to "true" or "false" here.
 tic
     [sol,resnorm,res,eflag,output2] = fmincon(@Objective,x0,[],[],[],[],lb,ub,@NewModel_SteadyState_newest,opts_checkgradient); % or bounds as: +/-Inf.*ones(length(x0),1)
 toc         
@@ -152,59 +156,43 @@ obj_is_scalar=1; % newton, FMINUNC. so that objective in "solve_given_params.m" 
 
 
     
-%% looking at the solution
+%% solution
 x=sol
 x=real(x); 
 P_input = [1; x(Pfrom:Pto)];
 WAGE = x(WAGEfrom:WAGEto);
-Y = x(Yfrom:Yto);
-Y = Y./P_input; 
+Y = x(Yfrom:Yto); 
 RDlabor_per = zeros(1,S+1,N);
 RDlabor_per(:,2:end,:) = reshape(x(RDlaborfrom:RDlaborto), 1, S, N);  
+RDlabor = permute(RDlabor_per, [3 2 1]);
+THOLD=ones(N,S+1,N);
+THOLD(:,2:end,:) = reshape(x(THOLDfrom:THOLDto), N, S, N)
+
+
+x=real(x); 
+P_input = [1; x(Pfrom:Pto)];
+% P_input = ones(N,1); % to shut off for J check
+WAGE = x(WAGEfrom:WAGEto);
+% WAGE = ones(N,1); % to shut off for J check
+Y = x(Yfrom:Yto);
+% Y = ones(N,1); % to shut off for J check
+Y = Y./P_input; % Simon suggests this works better
+RDlabor_per = zeros(1,S+1,N);
+RDlabor_per(:,2:end,:) = reshape(x(RDlaborfrom:RDlaborto), 1, S, N);  
+% RDlabor_per = 0.*RDlabor_per + 1; % ad hoc to check J
 RDlabor = permute(RDlabor_per, [3 2 1]);
 THOLD=ones(N,S+1,N);
 THOLD(:,2:end,:) = reshape(x(THOLDfrom:THOLDto), N, S, N); 
 
 
-
 % ----------------------------------------------------------------------- %
 %   From here: compute variables                                          %
 % ----------------------------------------------------------------------- %
-gPsi_s = sum(ETA_per.*k./(k-1).*RDlabor_per.^(1-kappa),3)-zeta;
-gPsi_s(1) = g_0_exo; % replace s=0 growth rate by exogenous value
-g = sum(Beta./(sig-1).*gPsi_s,2)/sum(Beta.*alpha,2);
-r = rho + g./Gamma;  
-Phi = permute(T, [3 2 1]).*(TAU.*permute(WAGE,[3 2 1]).^alpha.*permute(P_input,[3 2 1]).^(1-alpha)).^-theta;
-% ----------------------------------------------------------------------- %
-%   aggregate qualities                                                   %
-% ----------------------------------------------------------------------- %
-PsiM_P_ND = (ETA_per.*RDlabor_per.^(1-kappa).*k./(k-1).* ...
-    THOLD.^(1-k))./(gPsi_s+DELTA+nu+zeta);  
-PsiM_NP = (ETA_per.*RDlabor_per.^(1-kappa).*k./(k-1).* ...
-    (1-THOLD.^(1-k))+DELTA.*PsiM_P_ND)./(gPsi_s+nu+zeta); 
-PsiM_PL = nu.*PsiM_P_ND ./ (gPsi_s+DELTA+nu_tilde+zeta);
-PsiM_PD = nu_tilde.*PsiM_PL ./ (gPsi_s+DELTA+zeta);
-PsiCL = (nu.*PsiM_NP+DELTA.*PsiM_PL) ./ (gPsi_s+nu_tilde+zeta); 
-PsiM = PsiM_P_ND+PsiM_NP+PsiM_PL+PsiM_PD;     
-PsiCD = 1-sum(PsiM+PsiCL,3);
-% ----------------------------------------------------------------------- %
-%   other implied variables                                               %
-% ----------------------------------------------------------------------- %
-numerator_PMoverP =     (sig./(sig-1)).^(1-sig) .* sum(PsiM.*Phi.^((sig-1)./theta),3);
-numerator_PCLoverP = sum(PsiCL.*Phi.^((sig-1)./theta),3);
-numerator_PCDoverP = PsiCD.*sum(Phi,3).^((sig-1)./theta);
-denominator_allPoverP = numerator_PMoverP + numerator_PCLoverP + numerator_PCDoverP;
-PMoverP = (numerator_PMoverP./denominator_allPoverP).^(1./(1-sig));
-PCLoverP = (numerator_PCLoverP./denominator_allPoverP).^(1./(1-sig)); % denominator is the same as above.
-PCDoverP = (numerator_PCDoverP./denominator_allPoverP).^(1./(1-sig)); % denominator is the same as above.
-P = prod((gamma((theta+1-sig)./theta).*denominator_allPoverP).^(Beta./(1-sig)),2);
-XM = PsiM.*Phi.^((sig-1)./theta) ./ sum(PsiM.*Phi.^((sig-1)./theta),3) .* PMoverP.^(1-sig) .* Beta.*P.*Y;
-XM(isnan(XM)) = 0; % because of sector 0 issues with Inf and 0  
-XCL = PsiCL.*Phi.^((sig-1)./theta) ./ sum(PsiCL.*Phi.^((sig-1)./theta),3) .* PCLoverP.^(1-sig) .* Beta.*P.*Y;
-XCL(isnan(XCL)) = 0; % because of sector 0 issues with Inf and 0  
-XCD = Phi./sum(Phi,3) .* PCDoverP.^(1-sig) .* Beta.*P.*Y;
-Profnorm = XM ./ (sig.*PsiM.*permute(WAGE,[3 2 1]));
-Profnorm(isnan(Profnorm)) = 0; % because of sector 0 issues with Inf and 0  
+g_Psi_s = [sum(ETA_per*k/(k-1).*RDlabor_per.^(1-kappa),3)-zeta];
+g_Psi_s(1) = g_0_exo; % replace s=0 growth rate by exogenous value
+g = sum(Beta/(sig-1).*g_Psi_s,2)/sum(Beta.*alpha)
+
+r = rho + g/Gamma;  
 
 
 

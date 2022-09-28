@@ -90,7 +90,7 @@ PMoverP = (numerator_PMoverP./denominator_allPoverP).^(1./(1-sig));
 PCLoverP = (numerator_PCLoverP./denominator_allPoverP).^(1./(1-sig)); % denominator is the same as above.
 
 PCDoverP = (numerator_PCDoverP./denominator_allPoverP).^(1./(1-sig)); % denominator is the same as above.
-% go on here..still seems to be mistake in pcd over p.
+% go on here..still seems to be mistake in pcd over p. DIG DEEPER..check partials!!!!!!.
 P = prod((gamma((theta+1-sig)./theta).*denominator_allPoverP).^(Beta./(1-sig)),2);
 
 XM = PsiM.*Phi.^((sig-1)./theta) ./ sum(PsiM.*Phi.^((sig-1)./theta),3) .* PMoverP.^(1-sig) .* Beta.*P.*Y;
@@ -101,10 +101,14 @@ XCL(isnan(XCL)) = 0; % because of sector 0 issues with Inf and 0
 
 XCD = Phi./sum(Phi,3) .* PCDoverP.^(1-sig) .* Beta.*P.*Y;
 
+% XCL = 0.*XCL;  % AD HOC, REMOVE
+% XCL(:,2:end,:) = 0.04;% AD HOC, REMOVE
+% XCD = 0.*XCD + 0.04;% AD HOC, REMOVE
+
 % evening of sept 23. now i know that issue has to be with xcl and xcd..coz if these are set exogenously, then J is correct
 % now the tricky part: I checked all individual derivatives for XCL, still didnt find the issue. But what I know is e.g. from changing RDlabor that
 % "own sector" (for sectors 1 and 2, i.e. patenting sectors) gives problem, while the indirect one is fine. So, most likely seems a mistake on the
-% "Main diagonal"... howevver, what is weird is that all individual derivatives seem ok. update: the price index for "Comp-diffused" goods was the problem. 
+% "Main diagonal"... howevver, what is weird is that all individual derivatives seem ok.
 
 Profnorm = XM ./ (sig.*PsiM.*permute(WAGE,[3 2 1]));
 Profnorm(isnan(Profnorm)) = 0; % because of sector 0 issues with Inf and 0  
@@ -171,7 +175,7 @@ Dg_Psi_s(:, RDlaborfrom:RDlaborto) = reshape(ETA_per(:,2:end,:).*k./(k-1) ...
 
 
 % ----------------------------------------------------------------------- %
-%   g                                                                     %
+%   g            %
 % ----------------------------------------------------------------------- %
 Dg__g_Psi_s = Beta(:,2:end)./(sig(:,2:end)-1)./(sum(Beta.*alpha,2));
 Dg = sum(Dg__g_Psi_s.*permute(Dg_Psi_s, [2 1]),2);
@@ -184,6 +188,10 @@ DPhi_nsi=zeros(N,S+1,N, totvarnumb);
 
 DPhi_nsi(:,:,:, Pfrom:Pto) = -(1-alpha).*theta.*Phi./ ...
     permute(P_input(2:end), [2 3 4 1]).*permute([zeros(1,N-1); eye(N-1)], [3 4 1 2]); 
+
+%  abcd = -(1-alpha).*theta.*Phi./ ...
+%     permute(P_input(1:end), [2 3 4 1]).*permute([eye(N)], [3 4 1 2])
+% abcd = abcd(:,:,:,2:end); %  alternative, but the above seems indeed to be the same. can eventually delete this once J correct.
 
 DPhi_nsi(:,:,:, WAGEfrom:WAGEto) = -alpha.*theta.*Phi./ ...
     permute(WAGE, [2 3 4 1]).*permute(eye(N), [3 4 1 2]); 
@@ -235,6 +243,8 @@ DPsiM_NP(:,:,:, THOLDfrom:THOLDto) = reshape(ETA_per(:,2:end,:).* ...
 DPsiM_NP__g_Psi_s=zeros(N,S,N, S);
 DPsiM_NP__g_Psi_s = -PsiM_NP(:,2:end,:)./(gPsi_s(2:end)+nu(2:end)+zeta(2:end)) ...
     .*permute(eye(S),[3 1 4 2]);
+
+  %  .*permute(eye(S),[3 1 4 2]); % i think this is not needed
   
 
 DPsiM_NP__PsiM_P_ND=zeros(N,S,N, N,S,N);
