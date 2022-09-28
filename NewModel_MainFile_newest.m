@@ -1,0 +1,198 @@
+ 
+% This function computes the deviation 'dev' of the equilibrium equations given 
+% a vector x of endogenous variables, and provides the Jacobian 'J'.  
+clear all
+clc   
+ 
+global L sig zeta nu kappa k rho Gamma Beta theta 
+global N S
+global totvarnumb tradebalanceratios
+global T_fixed g_fixed GDPlevels % added on 3/8/20
+global nu_tilde % added on 18/10/21
+global alpha % added on 13/11/21
+global WAGEfrom WAGEto Yfrom Yto Pfrom Pto  RDlaborfrom RDlaborto THOLDfrom THOLDto 
+global ETAfrom ETAto Tfrom Tto TAUfrom TAUto DELTAfrom DELTAto Ffrom Fto PsiCDfrom PsiCDto;  
+global display_constr_value_prob; % added Jan 20, 2022
+global solvector % added Jan 2022
+global DELTA % added Jan 2022 for counterfactual exercises
+global ETA_per ETA T_per T TAU
+global TBratio
+global f_origin f_dest g_0_exo
+global obj_is_scalar
+
+%%
+
+% cd 'C:\Users\jschaerer\Documents\TRIPS(local)'; % change global path here
+% cd '.\Programs';
+% cd 'C:\Users\jschaerer\Dropbox\TRIPS\Code\new code'
+    
+N = 7
+S = 1 % number of sectors apart from sector 0
+
+ETA = [zeros(N,1) ones(N,S).*.02];
+ETA_per= permute(ETA, [3 2 1]);  
+% L = [1:N]';
+% L = [ 3.69530148,  7.10423778,  1.5908227 , 17.60963804]'
+L = [197426230  379553031.8  84991747  940817540   124021697  717517456   1758243964]';
+L = L./L(1);
+ 
+T = [1./N.*ones(1,N)]';
+k = 1.5;
+rho = 0.02
+alpha = 0.5.*ones(1,S+1)
+alpha = [.5758 .3545 .5.*ones(1,S-1)];
+f_origin = 2.3
+f_dest = 2.7
+sig = [3.*ones(1,S+1)];
+theta = [8.*ones(1,S+1)];
+Beta = [1./(S+1).*ones(1,S+1)]; % needs to add up to 1
+Beta = [.74 .26 .5.*ones(1,S-1)];
+Beta = Beta./sum(Beta)
+zeta = [0 .01 .01.*ones(1,S-1)]; % s=0 can put to zero wlog (because only g0 matters)
+g_0_exo = 0.01; % exogenous growth rate of sector 0
+TAU = ones(N,S+1,N) + 3.*ones(N,S+1,N).*permute(~eye(N), [1 3 2]);
+kappa = 0.5
+Gamma = 0.4
+DELTA = [ones(N,1)     ones(N,S).*.1];
+
+nu = [10^5 .2.*ones(1,S)]
+nu_tilde = nu./2
+
+TBratio = [0 0 0 zeros(1,N-3)]'; % needs to add up to 0. however, for now keep as zeros. Later, will have to modify.
+TBratio = [-0.00717168 0.00396144 0.00109624 0.00187530 0.00040032 -0.00027497 0.00011336].';
+TBratio = TBratio-sum(TBratio)./N; % to make sure adds up to zero
+
+% TBratio = [.0001 .0002 -.0003  zeros(1,N-3)]'; % needs to add up to 0. however, for now keep as zeros. Later, will have to modify.
+% % TBratio = ones(N,1);
+
+% ----------------------------------------------------------------------- %
+%   define which entries of x belong to which variable                    %
+% ----------------------------------------------------------------------- %
+Pfrom = 1; Pto = N-1;
+WAGEfrom = Pto+1; WAGEto = WAGEfrom-1 + N;    
+Yfrom = WAGEto+1; Yto = Yfrom-1 + N;
+RDlaborfrom = Yto+1; RDlaborto = RDlaborfrom-1 + N*S;
+THOLDfrom = RDlaborto+1; THOLDto = THOLDfrom-1 + N^2*S;
+totvarnumb = THOLDto;
+
+
+
+
+
+
+%% solve model
+
+x0 = [0.7.*(1+(1:3*N-1)./(3*N-1))'; .02.*(1+(1:N*S)./(N*S))'; 2.*(1+(1:N^2*S)./(N^2*S))']; % starting guess.
+
+    lb = [zeros(1,N-1) ...                    % P_input (Price index)
+      zeros(1,N) ...                    % WAGE
+      zeros(1,N) ...                    % Y
+      zeros(1,N*S) ...                  % RD labor
+      ones(1,N^2*S)]; %  patenting thresholds. whole vector is lower bound
+     
+    ub = [Inf.*ones(1,N-1) ...              % P_input (Price index)
+      Inf.*ones(1,N) ...              % WAGE
+      Inf.*ones(1,N) ...              % Y
+      Inf.*ones(1,N*S) ...            % ZR
+      Inf.*ones(1,N^2*S)]; % patenting thresholds. whole vector is upper bound
+
+
+%%
+NewModel_SteadyState_newest(x0)
+
+%% Jacobian check
+
+    opts_checkgradient = optimoptions(@fmincon,'Algorithm','interior-point', ...
+    'MaxFunctionEvaluations', 233009, 'MaxIterations', 100000, ...
+    'TolFun', 1e-12, 'StepTolerance', 1e-12 ...
+    , 'SpecifyConstraintGradient',true,  'SpecifyObjectiveGradient',false,  ... MAIN version possibly also with objective gradient check.
+    'CheckGradients',false,  'FiniteDifferenceType','central');
+tic
+    [sol,resnorm,res,eflag,output2] = fmincon(@Objective,x0,[],[],[],[],lb,ub,@NewModel_SteadyState_newest,opts_checkgradient); % MAIN. or bounds as: +/-Inf.*ones(length(x0),1)
+toc         
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+%%
+    % first, do lsq_trustregion a few times -- then, move to "main" option Lsqnonlin Lev for precision.
+    opts_lsq_trust = optimoptions(@lsqnonlin, 'MaxFunctionEvaluations', 20000,  'Algorithm','trust-region-reflective',  ...
+    'MaxIterations', 5000,'TolFun', 1e-18, 'StepTolerance', 1e-18, 'SpecifyObjectiveGradient',true, 'FiniteDifferenceType','central')
+
+    % same but with higher function tolerance and/or step tolerance
+    opts_lsq_trust = optimoptions(@lsqnonlin, 'MaxFunctionEvaluations', 20000,  'Algorithm','trust-region-reflective',  ...
+    'MaxIterations', 500,'TolFun', 1e-8, 'StepTolerance', 1e-8, 'SpecifyObjectiveGradient',true, 'FiniteDifferenceType','central')
+
+tic
+    resnorm = 100
+    while resnorm >10^-7
+        obj_is_scalar = 0 % so far, always used this
+        [sol,resnorm,res,eflag,output2] = lsqnonlin(@NewModel_SteadyState_newest,real(x0),lb,ub,opts_lsq_trust); % or: +/-Inf.*ones(length(x0),1)
+        x0=sol;
+    end 
+toc    
+    
+    % now do "main" option Lsqnonlin Lev for precision (gets vers precise).
+opts_lev = optimoptions(@lsqnonlin, 'MaxFunctionEvaluations', 20000000,  'Algorithm','levenberg-marquardt',  ...
+    'MaxIterations', 200000,'TolFun', 1e-18, 'StepTolerance', 1e-18,'FiniteDifferenceType','central' )
+
+
+opts_lev = optimoptions(@lsqnonlin, 'MaxFunctionEvaluations', 20000000,  'Algorithm','levenberg-marquardt',  ...
+    'MaxIterations', 200000,'TolFun', 1e-18, 'StepTolerance', 1e-18, 'SpecifyObjectiveGradient',true, 'FiniteDifferenceType','central' )
+    % Lsqnonlin & Lev-Levy. This is main setup for solving the model (used to be, chronologically, number 3) 
+    obj_is_scalar = 0
+    [sol,resnorm,res,eflag,output2] = lsqnonlin(@NewModel_SteadyState_newest,real(x0),lb,ub,opts_lev); % or: +/-Inf.*ones(length(x0),1)
+    x0=sol;
+    
+    
+    
+    % FMINUNC newton
+    opts_fminunc_newton = optimoptions(@fminunc, 'MaxFunctionEvaluations', 20000000,   ...
+'MaxIterations', 200000,'TolFun', 1e-8,  'TolX', 1e-18, 'SpecifyObjectiveGradient',true,'FiniteDifferenceType','central' )
+
+      obj_is_scalar=1; % newton, FMINUNC. so that objective in "solve_given_params.m" is scalar 
+    [sol,resnorm,res,eflag,output2] = fminunc(@NewModel_SteadyState_newest,real(x0),opts_fminunc_newton); % or: +/-Inf.*ones(length(x0),1)
+    x0=sol;
+
+    
+
+
+
+
+
+    
+%% solution
+x=sol
+x=real(x); 
+P_input = [1; x(Pfrom:Pto)];
+WAGE = x(WAGEfrom:WAGEto);
+Y = x(Yfrom:Yto); 
+RDlabor_per = zeros(1,S+1,N);
+RDlabor_per(:,2:end,:) = reshape(x(RDlaborfrom:RDlaborto), 1, S, N);  
+RDlabor = permute(RDlabor_per, [3 2 1]);
+THOLD=ones(N,S+1,N);
+THOLD(:,2:end,:) = reshape(x(THOLDfrom:THOLDto), N, S, N)
+
+
+% ----------------------------------------------------------------------- %
+%   From here: compute variables                                          %
+% ----------------------------------------------------------------------- %
+g_Psi_s = [sum(ETA_per*k/(k-1).*RDlabor_per.^(1-kappa),3)-zeta];
+g_Psi_s(1) = g_0_exo; % replace s=0 growth rate by exogenous value
+g = sum(Beta/(sig-1).*g_Psi_s,2)/sum(Beta.*alpha)
+
+r = rho + g/Gamma;  
+
+
+
+
